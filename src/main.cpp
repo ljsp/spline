@@ -7,8 +7,10 @@
 
 #include <math.h>
 #include <iostream>
+#include <format>
 
 #include "cubic_bezier_spline_2d/cubic_bezier_spline_2d.h"
+#include "cubic_hermite_spline_2d/cubic_hermite_spline_2d.h"
 #include "cubic_bspline_2d/cubic_bspline_2d.h"
 #include "discretization/discretization.h"
 
@@ -231,6 +233,92 @@ static void move_point(const bool is_canvas_hovered, int& selected_point, const 
     } 
 }
 
+static void ShowPropertiesWindow()
+{
+    ImGui::SetNextWindowSize(ImVec2(500, 440), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Properties", nullptr, ImGuiWindowFlags_NoCollapse))
+    {
+        // Top
+        {
+            ImGui::BeginChild("top pane", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY);
+            ImGui::Text("General settings");
+            ImGui::EndChild();
+        }
+        
+        // Left
+        static int selected = 0;
+        {
+            ImGui::BeginChild("left pane", ImVec2(150, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeX);
+            for (int i = 0; i < 10; i++)
+            {
+                if (ImGui::Selectable(std::format("Spline {}", i).c_str(), selected == i))
+                {
+                    selected = i;
+                }
+            }
+            ImGui::EndChild();
+        }
+        ImGui::SameLine();
+
+        // Right
+        {
+            ImGui::BeginGroup();
+            ImGui::BeginChild("item view", ImVec2(0, -ImGui::GetFrameHeightWithSpacing())); // Leave room for 1 line below us
+            ImGui::Text("Spline: %d", selected);
+            ImGui::Separator();
+            if (ImGui::BeginTabBar("##Tabs", ImGuiTabBarFlags_None))
+            {
+                if (ImGui::BeginTabItem("Properties"))
+                {
+                    // Child 2: rounded border
+                    {
+                        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
+                        ImGui::BeginChild("ChildR", ImVec2(0, 150), ImGuiChildFlags_Borders, ImGuiWindowFlags_MenuBar);
+                        if (ImGui::BeginMenuBar())
+                        {
+                            if (ImGui::BeginMenu("Points"))
+                            {
+                                ImGui::EndMenu();
+                            }
+                            ImGui::EndMenuBar();
+                        }
+                        if (ImGui::BeginTable("split", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings))
+                        {
+                            for (int i = 0; i < 10; i++)
+                            {                                
+                                ImGui::TableNextColumn();
+                                ImGui::Button(std::format("{}", i).c_str(), ImVec2(-FLT_MIN, 0.0f));
+                            }
+                            ImGui::EndTable();
+                        }
+                        ImGui::EndChild();
+                        ImGui::PopStyleVar();
+                    }
+                    static int discretization = 100;
+                    static bool draw_control_polygon = false;
+					static bool draw_normals = false;
+                    ImGui::SliderInt("Discretization", &discretization, 2, 200);
+                    ImGui::Checkbox("Show control polygon", &draw_control_polygon);
+                    ImGui::Checkbox("Draw normals", &draw_normals);
+                    
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Derivatives"))
+                {
+                    // TODO : Draw the canvas of the curve derivatives
+                    ImGui::Text("TODO");
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
+            }
+            ImGui::EndChild();
+            if (ImGui::Button("Delete")) {}
+            ImGui::EndGroup();
+        }
+    }
+    ImGui::End();
+}
+
 int main() 
 {
     GLFWwindow* window = nullptr;   
@@ -269,12 +357,12 @@ int main()
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
         
-        ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse;
-        ImGui::Begin("Spline options", nullptr, window_flags);
+        ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoCollapse);
 
-        ImGui::Checkbox("Enable grid", &opt_enable_grid);
-        ImGui::Checkbox("Enable context menu", &opt_enable_context_menu);
+        ImGui::Checkbox("Enable grid", &opt_enable_grid); ImGui::SameLine();
+        ImGui::Checkbox("Enable context menu", &opt_enable_context_menu); ImGui::SameLine();
         ImGui::Checkbox("Show demo window", &show_window);
+
         ImGui::Checkbox("Show control polygon", &draw_control_polygon);
         ImGui::Checkbox("Draw normals", &draw_normals);
         ImGui::Text("Mouse Left: drag to add lines,\nMouse Right: drag to scroll, click for context menu.");
@@ -310,6 +398,8 @@ int main()
         draw_control_points(bezier_control_points, origin, mouse_pos_in_canvas, point_radius, draw_control_polygon);
 
         if (show_window) { ImGui::ShowDemoWindow(&show_window); }
+        
+        ShowPropertiesWindow();
 
         ImGui::GetWindowDrawList()->PopClipRect();
         ImGui::End();
