@@ -8,11 +8,51 @@
 #include <math.h>
 #include <iostream>
 #include <format>
+#include <ranges>
 
 #include "cubic_bezier_spline_2d/cubic_bezier_spline_2d.h"
 #include "cubic_hermite_spline_2d/cubic_hermite_spline_2d.h"
 #include "cubic_bspline_2d/cubic_bspline_2d.h"
 #include "discretization/discretization.h"
+
+enum class spline_type
+{
+	BEZIER,
+    HERMITE,
+    BSPLINE
+};
+
+struct data
+{
+    std::vector < std::vector< glm::vec2 > > splines_points;
+    std::vector<spline_type> splines_type;
+    std::vector<glm::uvec3> splines_color;
+    std::vector<int32_t> splines_discretization;
+	std::vector<bool> splines_draw_control_polygon;
+    std::vector<bool> splines_draw_normals;
+
+    void add_spline
+    (
+        const std::vector<glm::vec2>& spline_points,
+        const spline_type spline_type,
+        const glm::uvec3 spline_color = glm::uvec3(255, 255, 255),
+		const int32_t spline_discretization = 100
+	)
+	{
+		splines_points.push_back(spline_points);
+		splines_type.push_back(spline_type);
+		splines_color.push_back(spline_color);
+		splines_discretization.push_back(spline_discretization);
+	}
+    
+	void remove_spline(size_t index)
+	{
+		splines_points.erase(splines_points.begin() + index);
+		splines_type.erase(splines_type.begin() + index);
+		splines_color.erase(splines_color.begin() + index);
+		splines_discretization.erase(splines_discretization.begin() + index);
+	}
+};
 
 static void init_glfw_and_imgui(GLFWwindow*& window)
 {
@@ -122,54 +162,73 @@ static void draw_grid(bool is_grid_drawn, const ImVec2& canvas_p0, const ImVec2&
     }
 }
 
-static void draw_discrete_points(const std::vector<glm::vec2>& points, const glm::vec2& origin, const bool draw_normals)
+static void draw_discrete_points(const data& data, const glm::vec2& origin, const bool draw_normals)
 {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
-    for (int n = 0; n < points.size() - 1; n++)
+
+    for (size_t i = 0; i < data.splines_points.size(); i++)
     {
-        const glm::vec2 point = points[n] + origin;
-		const glm::vec2 next = points[n + 1] + origin;
-        
-        draw_list->AddLine({ point.x, point.y }, { next.x, next.y }, IM_COL32(255, 255, 0, 255), 2.0f);
-        draw_list->AddCircleFilled(ImVec2(origin.x + points[n].x, origin.y + points[n].y), 3, IM_COL32(255, 0, 0, 255));
-        if (draw_normals && n > 0)
+        std::vector<glm::vec2> points;
+        const std::vector<glm::vec2>& control_points = data.splines_points[i];
+        const int32_t discretization = data.splines_discretization[i];
+        switch (data.splines_type[i])
         {
-			glm::vec2 tangent = points[n + 1] - points[n - 1];
-			glm::vec2 normal(-tangent.y, tangent.x);
-            normal = glm::normalize(normal);
-            normal *= 20.;
-            draw_list->AddLine(ImVec2(origin.x + points[n].x, origin.y + points[n].y), ImVec2(origin.x + points[n].x + normal.x, origin.y + points[n].y + normal.y), IM_COL32(0, 255, 0, 255), 2.0f);
+            using enum spline_type;
+            case BEZIER:  { points = Discretization::Linear(CubicBezierSpline2d(control_points), discretization);  } break;
+            case HERMITE: { points = Discretization::Linear(CubicHermiteSpline2d(control_points), discretization); } break;
+            case BSPLINE: { points = Discretization::Linear(CubicBSpline2d(control_points), discretization);       } break;
+            default:                                                                                                 break;
         }
-    
-    }
-    if(!points.empty())
-    {
-        draw_list->AddCircleFilled(ImVec2(origin.x + points.back().x, origin.y + points.back().y), 3, IM_COL32(255, 0, 0, 255));
+
+        for (int n = 0; n < points.size() - 1; n++)
+        {
+            const glm::vec2 point = points[n] + origin;
+            const glm::vec2 next = points[n + 1] + origin;
+
+            draw_list->AddLine({ point.x, point.y }, { next.x, next.y }, IM_COL32(255, 255, 0, 255), 2.0f);
+            draw_list->AddCircleFilled(ImVec2(origin.x + points[n].x, origin.y + points[n].y), 3, IM_COL32(255, 0, 0, 255));
+            if (draw_normals && n > 0)
+            {
+                glm::vec2 tangent = points[n + 1] - points[n - 1];
+                glm::vec2 normal(-tangent.y, tangent.x);
+                normal = glm::normalize(normal);
+                normal *= 20.;
+                draw_list->AddLine(ImVec2(origin.x + points[n].x, origin.y + points[n].y), ImVec2(origin.x + points[n].x + normal.x, origin.y + points[n].y + normal.y), IM_COL32(0, 255, 0, 255), 2.0f);
+            }
+
+        }
+        if (!points.empty())
+        {
+            draw_list->AddCircleFilled(ImVec2(origin.x + points.back().x, origin.y + points.back().y), 3, IM_COL32(255, 0, 0, 255));
+        }
     }
 }
 
-static void draw_control_points(const std::vector<glm::vec2>& control_points, const glm::vec2& origin, const glm::vec2& mouse_pos_in_canvas, const float point_radius, const bool draw_control_polygon)
+static void draw_control_points(const data& data, const glm::vec2& origin, const glm::vec2& mouse_pos_in_canvas, const float point_radius, const bool draw_control_polygon)
 {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
-    const glm::vec2* previous_point = nullptr;
+	for (size_t i = 0; i < data.splines_points.size(); i++)
+	{
+        const glm::vec2* previous_point = nullptr;
 
-    for (const auto& point : control_points)
-    {
-        ImVec2 screen_pos(origin.x + point.x, origin.y + point.y);
-
-        if (draw_control_polygon && previous_point)
+        for (const auto& point : data.splines_points[i])
         {
-            ImVec2 prev_screen_pos(origin.x + previous_point->x, origin.y + previous_point->y);
-            draw_list->AddLine(prev_screen_pos, screen_pos, IM_COL32(255, 255, 255, 255), 2.0f);
-        }
-        
-        glm::vec2 mouse_to_point = glm::vec2(mouse_pos_in_canvas.x, mouse_pos_in_canvas.y) - point;
-        ImU32 color = glm::length(mouse_to_point) < point_radius ? IM_COL32(0, 255, 0, 255) : IM_COL32(0, 0, 255, 255);
-        draw_list->AddCircleFilled(screen_pos, point_radius, color);
+            ImVec2 screen_pos(origin.x + point.x, origin.y + point.y);
 
-        previous_point = &point;
-    }
+            if (draw_control_polygon && previous_point)
+            {
+                ImVec2 prev_screen_pos(origin.x + previous_point->x, origin.y + previous_point->y);
+                draw_list->AddLine(prev_screen_pos, screen_pos, IM_COL32(255, 255, 255, 255), 2.0f);
+            }
+
+            glm::vec2 mouse_to_point = glm::vec2(mouse_pos_in_canvas.x, mouse_pos_in_canvas.y) - point;
+            ImU32 color = glm::length(mouse_to_point) < point_radius ? IM_COL32(0, 255, 0, 255) : IM_COL32(0, 0, 255, 255);
+            draw_list->AddCircleFilled(screen_pos, point_radius, color);
+
+            previous_point = &point;
+        }
+	}
 }
 
 static void pan(bool is_active, bool is_context_menu_drawn, glm::vec2& scrolling)
@@ -200,7 +259,7 @@ static void add_line(const bool is_canvas_hovered, bool& adding_line, const ImVe
     }
 }
 
-static void move_point(const bool is_canvas_hovered, int& selected_point, const glm::vec2& mouse_pos_in_canvas, std::vector<glm::vec2>& control_points, const float point_radius)
+static void move_point(data& data, const bool is_canvas_hovered, int& selected_curve, int& selected_point, const glm::vec2& mouse_pos_in_canvas, const float point_radius)
 {
     if (is_canvas_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     {
@@ -211,23 +270,30 @@ static void move_point(const bool is_canvas_hovered, int& selected_point, const 
 			return glm::length(mouse_to_point) < point_radius;
 		};
         
-        if (auto it = std::ranges::find_if(control_points, point_is_near_mouse); it != control_points.end())
+        for (size_t i = 0; i < data.splines_points.size(); i++)
         {
-            point_near_mouse_id = static_cast<int>(std::distance(control_points.begin(), it));
+			const auto& control_points = data.splines_points[i];
+            if (auto it = std::ranges::find_if(control_points, point_is_near_mouse); it != control_points.end())
+            {
+                point_near_mouse_id = static_cast<int>(std::distance(control_points.begin(), it));
+            }
+        
+            if(point_near_mouse_id != -1)
+            {
+                selected_curve = static_cast<int>(i);
+                selected_point = point_near_mouse_id;
+            }
         }
          
-        if(point_near_mouse_id != -1)
-        {
-            selected_point = point_near_mouse_id;
-        }
     }
     
-    if (selected_point != -1)
+    if (selected_point != -1 && selected_curve != -1)
     {
-        control_points[selected_point] =  {mouse_pos_in_canvas.x, mouse_pos_in_canvas.y};
-        draw_point_info(control_points[selected_point]);
+        data.splines_points[selected_curve][selected_point] =  {mouse_pos_in_canvas.x, mouse_pos_in_canvas.y};
+        draw_point_info(data.splines_points[selected_curve][selected_point]);
         if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
         {
+            selected_curve = -1;
             selected_point = -1;
         }
     } 
@@ -270,7 +336,6 @@ static void ShowPropertiesWindow()
             {
                 if (ImGui::BeginTabItem("Properties"))
                 {
-                    // Child 2: rounded border
                     {
                         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
                         ImGui::BeginChild("ChildR", ImVec2(0, 150), ImGuiChildFlags_Borders, ImGuiWindowFlags_MenuBar);
@@ -330,27 +395,26 @@ int main()
     static bool show_window = false;
     static bool opt_enable_grid = true;
     static bool opt_enable_context_menu = true;
-    static bool adding_line = false;
     static float point_radius = 5.;
     static int discretization = 100;
     static bool draw_control_polygon = false;
     static bool draw_normals = false;
     
     static glm::vec2 scrolling(0.0f, 0.0f);
+	static int selected_curve = -1;
     static int selected_point = -1;
-    static std::vector<glm::vec2> points;
-    static std::vector<glm::vec2> bezier_control_points = { {0, 0}, {0, 100}, {100, 100}, {100, 0}, {200, 0}, {200, 100}, {200, 200}, {300, 0} };
+    
+    data data;
+    std::vector<glm::vec2> bezier_control_points = { {0, 0}, {0, 100}, {100, 100}, {100, 0}, {200, 0}, {200, 100}, {200, 200}, {300, 0} };
+    std::vector<glm::vec2> bspline_control_points = { {0, 0}, {0, 100}, {100, 100}, {100, 0}, {200, 0}, {200, 100}, {200, 200}, {300, 0} };
+    data.add_spline(bezier_control_points, spline_type::BEZIER);
+    data.add_spline(bspline_control_points, spline_type::BSPLINE);
 
     while (!glfwWindowShouldClose(window)) 
     {
         // Data
         CubicBSpline2d bezier_spline(bezier_control_points);
         std::vector<glm::vec2> bezier_points = Discretization::Linear(bezier_spline, discretization);
-        points.clear();
-        for (const auto& point : bezier_points)
-        {
-            points.emplace_back(point.x, point.y);
-        }
 
         // GUI
         ImGui_ImplOpenGL3_NewFrame();
@@ -366,7 +430,7 @@ int main()
         ImGui::Checkbox("Show control polygon", &draw_control_polygon);
         ImGui::Checkbox("Draw normals", &draw_normals);
         ImGui::Text("Mouse Left: drag to add lines,\nMouse Right: drag to scroll, click for context menu.");
-        ImGui::Text("Number of points: %d", points.size());
+        //ImGui::Text("Number of points: %d", points.size());
         ImGui::SliderFloat("Point size", &point_radius, 1., 20.);
 		ImGui::SliderInt("Discretization", &discretization, 2, 200);
         
@@ -385,17 +449,17 @@ int main()
 
         draw_border(canvas_p0, canvas_p1);
 
-        move_point(is_canvas_hovered, selected_point, mouse_pos_in_canvas, bezier_control_points, point_radius);
+        move_point(data, is_canvas_hovered, selected_curve, selected_point, mouse_pos_in_canvas, point_radius);
 
         pan(is_active, opt_enable_context_menu, scrolling);
 
-        draw_context_menu(opt_enable_context_menu, adding_line, points);
+        //draw_context_menu(opt_enable_context_menu, adding_line, points);
 
         draw_grid(opt_enable_grid, canvas_p0, canvas_sz, scrolling);
 
-        draw_discrete_points(points, origin, draw_normals);
+        draw_discrete_points(data, origin, draw_normals);
 
-        draw_control_points(bezier_control_points, origin, mouse_pos_in_canvas, point_radius, draw_control_polygon);
+        draw_control_points(data, origin, mouse_pos_in_canvas, point_radius, draw_control_polygon);
 
         if (show_window) { ImGui::ShowDemoWindow(&show_window); }
         
