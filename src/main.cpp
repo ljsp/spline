@@ -9,6 +9,7 @@
 #include <iostream>
 
 #include "cubic_bezier_spline_2d/cubic_bezier_spline_2d.h"
+#include "cubic_bspline_2d/cubic_bspline_2d.h"
 #include "discretization/discretization.h"
 
 static void init_glfw_and_imgui(GLFWwindow*& window)
@@ -255,7 +256,7 @@ int main()
     while (!glfwWindowShouldClose(window)) 
     {
         // Data
-        CubicBezierSpline2d bezier_spline(bezier_control_points);
+        CubicBSpline2d bezier_spline(bezier_control_points);
         std::vector<glm::vec2> bezier_points = Discretization::Linear(bezier_spline, discretization);
         points.clear();
         for (const auto& point : bezier_points)
