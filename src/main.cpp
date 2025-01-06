@@ -15,12 +15,52 @@
 #include "cubic_bspline_2d/cubic_bspline_2d.h"
 #include "discretization/discretization.h"
 
-enum class spline_type
+enum class spline_type : uint32_t
 {
 	BEZIER,
     HERMITE,
     BSPLINE
 };
+
+enum class draw_option : uint32_t
+{
+    NONE                = 0,
+    CONTROL_POLYGON     = 1 << 0,
+    NORMALS             = 1 << 1
+};
+
+inline draw_option operator|(draw_option a, draw_option b) 
+{
+    return static_cast<draw_option>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+
+inline draw_option operator&(draw_option a, draw_option b) 
+{
+    return static_cast<draw_option>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+}
+
+inline draw_option& operator|=(draw_option& a, draw_option b) 
+{
+    a = a | b;
+    return a;
+}
+
+inline draw_option& operator&=(draw_option& a, draw_option b) 
+{
+    a = a & b;
+    return a;
+}
+
+inline draw_option& operator^=(draw_option& a, draw_option b) 
+{
+    a = static_cast<draw_option>(static_cast<uint32_t>(a) ^ static_cast<uint32_t>(b));
+    return a;
+}
+
+inline draw_option operator~(draw_option a) 
+{
+    return static_cast<draw_option>(~static_cast<uint32_t>(a));
+}
 
 struct data
 {
@@ -28,8 +68,7 @@ struct data
     std::vector<spline_type> splines_type;
     std::vector<glm::uvec3> splines_color;
     std::vector<int32_t> splines_discretization;
-	std::vector<bool> splines_draw_control_polygon;
-    std::vector<bool> splines_draw_normals;
+	std::vector<draw_option> splines_draw_options;
 
     void add_spline
     (
@@ -43,6 +82,7 @@ struct data
 		splines_type.push_back(spline_type);
 		splines_color.push_back(spline_color);
 		splines_discretization.push_back(spline_discretization);
+		splines_draw_options.push_back(draw_option::NONE);
 	}
     
 	void remove_spline(size_t index)
@@ -162,7 +202,7 @@ static void draw_grid(bool is_grid_drawn, const ImVec2& canvas_p0, const ImVec2&
     }
 }
 
-static void draw_discrete_points(const data& data, const glm::vec2& origin, const bool draw_normals)
+static void draw_discrete_points(const data& data, const glm::vec2& origin)
 {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
@@ -180,6 +220,7 @@ static void draw_discrete_points(const data& data, const glm::vec2& origin, cons
             default:                                                                                                 break;
         }
 
+		auto draw_normals = static_cast<bool>(data.splines_draw_options[i] & draw_option::NORMALS);
         for (int n = 0; n < points.size() - 1; n++)
         {
             const glm::vec2 point = points[n] + origin;
@@ -204,14 +245,14 @@ static void draw_discrete_points(const data& data, const glm::vec2& origin, cons
     }
 }
 
-static void draw_control_points(const data& data, const glm::vec2& origin, const glm::vec2& mouse_pos_in_canvas, const float point_radius, const bool draw_control_polygon)
+static void draw_control_points(const data& data, const glm::vec2& origin, const glm::vec2& mouse_pos_in_canvas, const float point_radius)
 {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
 	for (size_t i = 0; i < data.splines_points.size(); i++)
 	{
         const glm::vec2* previous_point = nullptr;
-
+        auto draw_control_polygon = static_cast<bool>(data.splines_draw_options[i] & draw_option::CONTROL_POLYGON);
         for (const auto& point : data.splines_points[i])
         {
             ImVec2 screen_pos(origin.x + point.x, origin.y + point.y);
@@ -299,7 +340,7 @@ static void move_point(data& data, const bool is_canvas_hovered, int& selected_c
     } 
 }
 
-static void ShowPropertiesWindow()
+static void ShowPropertiesWindow(data& data)
 {
     ImGui::SetNextWindowSize(ImVec2(500, 440), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Properties", nullptr, ImGuiWindowFlags_NoCollapse))
@@ -315,7 +356,7 @@ static void ShowPropertiesWindow()
         static int selected = 0;
         {
             ImGui::BeginChild("left pane", ImVec2(150, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeX);
-            for (int i = 0; i < 10; i++)
+            for (int i = 0; i < data.splines_points.size(); i++)
             {
                 if (ImGui::Selectable(std::format("Spline {}", i).c_str(), selected == i))
                 {
@@ -326,16 +367,34 @@ static void ShowPropertiesWindow()
         }
         ImGui::SameLine();
 
+		if (data.splines_points.empty())
+		{
+			ImGui::End();
+			return;
+		}
+
         // Right
         {
             ImGui::BeginGroup();
             ImGui::BeginChild("item view", ImVec2(0, -ImGui::GetFrameHeightWithSpacing())); // Leave room for 1 line below us
-            ImGui::Text("Spline: %d", selected);
+            //ImGui::Text("Spline: %d", selected);
+            
+            std::string type;
+            switch (data.splines_type[selected])
+            {
+                using enum spline_type;
+                case BEZIER: { type = "Bezier";  } break;
+                case HERMITE: { type = "Hermite"; } break;
+                case BSPLINE: { type = "BSpline"; } break;
+                default:                            break;
+            }
+            ImGui::Text("Type: %s", type.c_str());
+
             ImGui::Separator();
             if (ImGui::BeginTabBar("##Tabs", ImGuiTabBarFlags_None))
             {
                 if (ImGui::BeginTabItem("Properties"))
-                {
+                {   
                     {
                         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
                         ImGui::BeginChild("ChildR", ImVec2(0, 150), ImGuiChildFlags_Borders, ImGuiWindowFlags_MenuBar);
@@ -349,22 +408,25 @@ static void ShowPropertiesWindow()
                         }
                         if (ImGui::BeginTable("split", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings))
                         {
-                            for (int i = 0; i < 10; i++)
+                            for (int i = 0; i < data.splines_points[selected].size(); i++)
                             {                                
                                 ImGui::TableNextColumn();
-                                ImGui::Button(std::format("{}", i).c_str(), ImVec2(-FLT_MIN, 0.0f));
+                                const glm::vec2& point = data.splines_points[selected][i];
+                                ImGui::Button(std::format("{} {}", point.x, point.y).c_str(), ImVec2(-FLT_MIN, 0.0f));
                             }
                             ImGui::EndTable();
                         }
                         ImGui::EndChild();
                         ImGui::PopStyleVar();
                     }
-                    static int discretization = 100;
-                    static bool draw_control_polygon = false;
-					static bool draw_normals = false;
-                    ImGui::SliderInt("Discretization", &discretization, 2, 200);
-                    ImGui::Checkbox("Show control polygon", &draw_control_polygon);
-                    ImGui::Checkbox("Draw normals", &draw_normals);
+
+                    ImGui::SliderInt("Discretization", &data.splines_discretization[selected], 2, 200);
+                    
+					bool draw_control_polygon = static_cast<uint32_t>(data.splines_draw_options[selected] & draw_option::CONTROL_POLYGON);
+                    if (ImGui::Checkbox("Draw control polygon", &draw_control_polygon)) { data.splines_draw_options[selected] ^= draw_option::CONTROL_POLYGON; }
+                    
+                    bool draw_normals = static_cast<uint32_t>(data.splines_draw_options[selected] & draw_option::NORMALS);
+                    if (ImGui::Checkbox("Draw normals", &draw_normals)) { data.splines_draw_options[selected] ^= draw_option::NORMALS; }
                     
                     ImGui::EndTabItem();
                 }
@@ -377,7 +439,11 @@ static void ShowPropertiesWindow()
                 ImGui::EndTabBar();
             }
             ImGui::EndChild();
-            if (ImGui::Button("Delete")) {}
+            if (ImGui::Button("Delete")) 
+            {
+				data.remove_spline(selected);
+                selected = 0;
+            }
             ImGui::EndGroup();
         }
     }
@@ -396,9 +462,6 @@ int main()
     static bool opt_enable_grid = true;
     static bool opt_enable_context_menu = true;
     static float point_radius = 5.;
-    static int discretization = 100;
-    static bool draw_control_polygon = false;
-    static bool draw_normals = false;
     
     static glm::vec2 scrolling(0.0f, 0.0f);
 	static int selected_curve = -1;
@@ -414,7 +477,6 @@ int main()
     {
         // Data
         CubicBSpline2d bezier_spline(bezier_control_points);
-        std::vector<glm::vec2> bezier_points = Discretization::Linear(bezier_spline, discretization);
 
         // GUI
         ImGui_ImplOpenGL3_NewFrame();
@@ -427,12 +489,8 @@ int main()
         ImGui::Checkbox("Enable context menu", &opt_enable_context_menu); ImGui::SameLine();
         ImGui::Checkbox("Show demo window", &show_window);
 
-        ImGui::Checkbox("Show control polygon", &draw_control_polygon);
-        ImGui::Checkbox("Draw normals", &draw_normals);
         ImGui::Text("Mouse Left: drag to add lines,\nMouse Right: drag to scroll, click for context menu.");
-        //ImGui::Text("Number of points: %d", points.size());
         ImGui::SliderFloat("Point size", &point_radius, 1., 20.);
-		ImGui::SliderInt("Discretization", &discretization, 2, 200);
         
         ImVec2 canvas_sz = ImGui::GetContentRegionAvail();
         if (canvas_sz.x < 50.0f) canvas_sz.x = 50.0f;
@@ -457,13 +515,13 @@ int main()
 
         draw_grid(opt_enable_grid, canvas_p0, canvas_sz, scrolling);
 
-        draw_discrete_points(data, origin, draw_normals);
+        draw_discrete_points(data, origin);
 
-        draw_control_points(data, origin, mouse_pos_in_canvas, point_radius, draw_control_polygon);
+        draw_control_points(data, origin, mouse_pos_in_canvas, point_radius);
 
         if (show_window) { ImGui::ShowDemoWindow(&show_window); }
         
-        ShowPropertiesWindow();
+        ShowPropertiesWindow(data);
 
         ImGui::GetWindowDrawList()->PopClipRect();
         ImGui::End();
