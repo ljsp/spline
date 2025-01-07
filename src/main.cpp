@@ -340,31 +340,145 @@ static void move_point(data& data, const bool is_canvas_hovered, int& selected_c
     } 
 }
 
+static void SplinePropertiesTab(data& data, const size_t selected)
+{
+    if (ImGui::BeginTabItem("Properties"))
+    {
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
+        ImGui::BeginChild("ChildR", ImVec2(0, 150), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY, ImGuiWindowFlags_MenuBar);
+        if (ImGui::BeginMenuBar())
+        {
+            ImGui::BeginDisabled(true);
+            if (ImGui::BeginMenu("Control Points"))
+            {
+                ImGui::EndMenu();
+            }
+            ImGui::EndDisabled();
+            ImGui::EndMenuBar();
+        }
+        if (ImGui::BeginTable("split", 3, ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_SizingStretchProp))
+        {
+            ImGui::TableNextColumn();
+            ImGui::Text("");
+            ImGui::TableNextColumn();
+            ImGui::Text("X");
+            ImGui::TableNextColumn();
+            ImGui::Text("Y");
+
+            for (int i = 0; i < data.splines_points[selected].size(); i++)
+            {
+                ImGui::TableNextColumn();
+                glm::vec2& point = data.splines_points[selected][i];
+                ImGui::Text("%d :", i);
+
+                ImGui::TableNextColumn();
+                ImGui::PushID(2 * i);
+                ImGui::PushItemWidth(-FLT_MIN);
+                ImGui::DragFloat(" ", &point.x, 1.f, -1000.0f, 1000.0f);
+                ImGui::PopItemWidth();
+                ImGui::PopID();
+
+                ImGui::TableNextColumn();
+                ImGui::PushID(2 * i + 1);
+                ImGui::PushItemWidth(-FLT_MIN);
+                ImGui::DragFloat(" ", &point.y, 1.f, -1000.0f, 1000.0f);
+                ImGui::PopItemWidth();
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleVar();
+    }
+
+    ImGui::SliderInt("Discretization", &data.splines_discretization[selected], 2, 200);
+
+    bool draw_control_polygon = static_cast<uint32_t>(data.splines_draw_options[selected] & draw_option::CONTROL_POLYGON);
+    if (ImGui::Checkbox("Draw control polygon", &draw_control_polygon)) { data.splines_draw_options[selected] ^= draw_option::CONTROL_POLYGON; }
+
+    bool draw_normals = static_cast<uint32_t>(data.splines_draw_options[selected] & draw_option::NORMALS);
+    if (ImGui::Checkbox("Draw normals", &draw_normals)) { data.splines_draw_options[selected] ^= draw_option::NORMALS; }
+
+    ImGui::EndTabItem();
+}
+
+static void GeneralSettings()
+{
+    ImGui::BeginChild("top pane", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY);
+    ImGui::Text("General settings");
+    ImGui::EndChild();
+}
+
+static void SplineList(const data& data, size_t& selected)
+{
+    ImGui::BeginChild("left pane", ImVec2(150, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeX);
+    for (int i = 0; i < data.splines_points.size(); i++)
+    {
+        if (ImGui::Selectable(std::format("Spline {}", i).c_str(), selected == i))
+        {
+            selected = i;
+        }
+    }
+    ImGui::EndChild();
+}
+
+static void SplineProperties(data& data, size_t& selected)
+{
+    ImGui::BeginGroup();
+    ImGui::BeginChild("item view", ImVec2(0, -ImGui::GetFrameHeightWithSpacing())); // Leave room for 1 line below us
+
+    std::string type;
+    switch (data.splines_type[selected])
+    {
+        using enum spline_type;
+        case BEZIER:  { type = "Bezier";  } break;
+        case HERMITE: { type = "Hermite"; } break;
+        case BSPLINE: { type = "BSpline"; } break;
+        default:                            break;
+    }
+    ImGui::Text("Type: %s", type.c_str());
+
+    ImGui::Separator();
+    if (ImGui::BeginTabBar("Tabs", ImGuiTabBarFlags_None))
+    {
+        SplinePropertiesTab(data, selected);
+
+        if (ImGui::BeginTabItem("Derivatives"))
+        {
+            // TODO : Draw the canvas of the curve derivatives
+            ImGui::Text("TODO");
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("As Other Type"))
+        {
+            ImGui::Text("TODO");
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+    ImGui::EndChild();
+
+    if (ImGui::Button("Delete"))
+    {
+        data.remove_spline(selected);
+        selected = 0;
+    }
+    ImGui::EndGroup();
+}
+
 static void ShowPropertiesWindow(data& data)
 {
     ImGui::SetNextWindowSize(ImVec2(500, 440), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Properties", nullptr, ImGuiWindowFlags_NoCollapse))
+    if (ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_NoCollapse))
     {
+        static size_t selected = 0;
+        
         // Top
-        {
-            ImGui::BeginChild("top pane", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY);
-            ImGui::Text("General settings");
-            ImGui::EndChild();
-        }
+        GeneralSettings();
         
         // Left
-        static int selected = 0;
-        {
-            ImGui::BeginChild("left pane", ImVec2(150, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeX);
-            for (int i = 0; i < data.splines_points.size(); i++)
-            {
-                if (ImGui::Selectable(std::format("Spline {}", i).c_str(), selected == i))
-                {
-                    selected = i;
-                }
-            }
-            ImGui::EndChild();
-        }
+        SplineList(data, selected);
         ImGui::SameLine();
 
 		if (data.splines_points.empty())
@@ -374,107 +488,7 @@ static void ShowPropertiesWindow(data& data)
 		}
 
         // Right
-        {
-            ImGui::BeginGroup();
-            ImGui::BeginChild("item view", ImVec2(0, -ImGui::GetFrameHeightWithSpacing())); // Leave room for 1 line below us
-            //ImGui::Text("Spline: %d", selected);
-            
-            std::string type;
-            switch (data.splines_type[selected])
-            {
-                using enum spline_type;
-                case BEZIER:  { type = "Bezier";  } break;
-                case HERMITE: { type = "Hermite"; } break;
-                case BSPLINE: { type = "BSpline"; } break;
-                default:                            break;
-            }
-            ImGui::Text("Type: %s", type.c_str());
-
-            ImGui::Separator();
-            if (ImGui::BeginTabBar("##Tabs", ImGuiTabBarFlags_None))
-            {
-                if (ImGui::BeginTabItem("Properties"))
-                {   
-                    {
-                        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
-                        ImGui::BeginChild("ChildR", ImVec2(0, 150), ImGuiChildFlags_Borders, ImGuiWindowFlags_MenuBar);
-                        if (ImGui::BeginMenuBar())
-                        {
-                            ImGui::BeginDisabled(true);
-                            if (ImGui::BeginMenu("Control Points"))
-                            {
-                                ImGui::EndMenu();
-                            }
-                            ImGui::EndDisabled();
-                            ImGui::EndMenuBar();
-                        }
-                        if (ImGui::BeginTable("split", 3, ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_SizingStretchProp))
-                        {                            
-                            ImGui::TableNextColumn();
-                            ImGui::Text("");
-                            ImGui::TableNextColumn();
-                            ImGui::Text("X");
-                            ImGui::TableNextColumn();
-                            ImGui::Text("Y");
-
-                            static float vec4f[4] = { 0.10f, 0.20f, 0.30f, 0.44f };
-                            for (int i = 0; i < data.splines_points[selected].size(); i++)
-                            {                                
-                                ImGui::TableNextColumn();
-                                glm::vec2& point = data.splines_points[selected][i];
-								ImGui::Text("%d :", i);
-
-                                ImGui::TableNextColumn();
-                                ImGui::PushID(2 * i);
-                                ImGui::PushItemWidth(-FLT_MIN);
-                                ImGui::DragFloat(" ", &point.x, 1.f, -1000.0f, 1000.0f);
-                                ImGui::PopItemWidth();
-                                ImGui::PopID();
-
-                                ImGui::TableNextColumn();
-                                ImGui::PushID(2 * i + 1);
-                                ImGui::PushItemWidth(-FLT_MIN);
-                                ImGui::DragFloat(" ", &point.y, 1.f, -1000.0f, 1000.0f);
-                                ImGui::PopItemWidth();
-                                ImGui::PopID();
-                            }
-                            ImGui::EndTable();
-                        }
-                        ImGui::EndChild();
-                        ImGui::PopStyleVar();
-                    }
-
-                    ImGui::SliderInt("Discretization", &data.splines_discretization[selected], 2, 200);
-                    
-					bool draw_control_polygon = static_cast<uint32_t>(data.splines_draw_options[selected] & draw_option::CONTROL_POLYGON);
-                    if (ImGui::Checkbox("Draw control polygon", &draw_control_polygon)) { data.splines_draw_options[selected] ^= draw_option::CONTROL_POLYGON; }
-                    
-                    bool draw_normals = static_cast<uint32_t>(data.splines_draw_options[selected] & draw_option::NORMALS);
-                    if (ImGui::Checkbox("Draw normals", &draw_normals)) { data.splines_draw_options[selected] ^= draw_option::NORMALS; }
-                    
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Derivatives"))
-                {
-                    // TODO : Draw the canvas of the curve derivatives
-                    ImGui::Text("TODO");
-                    ImGui::EndTabItem();
-                }
-				if (ImGui::BeginTabItem("As Other Type"))
-				{
-                    ImGui::Text("TODO");
-					ImGui::EndTabItem();
-				}
-                ImGui::EndTabBar();
-            }
-            ImGui::EndChild();
-            if (ImGui::Button("Delete")) 
-            {
-				data.remove_spline(selected);
-                selected = 0;
-            }
-            ImGui::EndGroup();
-        }
+        SplineProperties(data, selected);
     }
     ImGui::End();
 }
@@ -517,6 +531,7 @@ int main()
         ImGui::Checkbox("Enable grid", &opt_enable_grid); ImGui::SameLine();
         ImGui::Checkbox("Enable context menu", &opt_enable_context_menu); ImGui::SameLine();
         ImGui::Checkbox("Show demo window", &show_window);
+        ImGui::Text("Application average %.1f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
 
         ImGui::Text("Mouse Left: drag to add lines,\nMouse Right: drag to scroll, click for context menu.");
         ImGui::SliderFloat("Point size", &point_radius, 1., 20.);
