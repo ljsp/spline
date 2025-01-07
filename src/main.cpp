@@ -383,7 +383,7 @@ static void ShowPropertiesWindow(data& data)
             switch (data.splines_type[selected])
             {
                 using enum spline_type;
-                case BEZIER: { type = "Bezier";  } break;
+                case BEZIER:  { type = "Bezier";  } break;
                 case HERMITE: { type = "Hermite"; } break;
                 case BSPLINE: { type = "BSpline"; } break;
                 default:                            break;
@@ -400,19 +400,43 @@ static void ShowPropertiesWindow(data& data)
                         ImGui::BeginChild("ChildR", ImVec2(0, 150), ImGuiChildFlags_Borders, ImGuiWindowFlags_MenuBar);
                         if (ImGui::BeginMenuBar())
                         {
-                            if (ImGui::BeginMenu("Points"))
+                            ImGui::BeginDisabled(true);
+                            if (ImGui::BeginMenu("Control Points"))
                             {
                                 ImGui::EndMenu();
                             }
+                            ImGui::EndDisabled();
                             ImGui::EndMenuBar();
                         }
-                        if (ImGui::BeginTable("split", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings))
-                        {
+                        if (ImGui::BeginTable("split", 3, ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_SizingStretchProp))
+                        {                            
+                            ImGui::TableNextColumn();
+                            ImGui::Text("");
+                            ImGui::TableNextColumn();
+                            ImGui::Text("X");
+                            ImGui::TableNextColumn();
+                            ImGui::Text("Y");
+
+                            static float vec4f[4] = { 0.10f, 0.20f, 0.30f, 0.44f };
                             for (int i = 0; i < data.splines_points[selected].size(); i++)
                             {                                
                                 ImGui::TableNextColumn();
-                                const glm::vec2& point = data.splines_points[selected][i];
-                                ImGui::Button(std::format("{} {}", point.x, point.y).c_str(), ImVec2(-FLT_MIN, 0.0f));
+                                glm::vec2& point = data.splines_points[selected][i];
+								ImGui::Text("%d :", i);
+
+                                ImGui::TableNextColumn();
+                                ImGui::PushID(2 * i);
+                                ImGui::PushItemWidth(-FLT_MIN);
+                                ImGui::DragFloat(" ", &point.x, 1.f, -1000.0f, 1000.0f);
+                                ImGui::PopItemWidth();
+                                ImGui::PopID();
+
+                                ImGui::TableNextColumn();
+                                ImGui::PushID(2 * i + 1);
+                                ImGui::PushItemWidth(-FLT_MIN);
+                                ImGui::DragFloat(" ", &point.y, 1.f, -1000.0f, 1000.0f);
+                                ImGui::PopItemWidth();
+                                ImGui::PopID();
                             }
                             ImGui::EndTable();
                         }
@@ -436,6 +460,11 @@ static void ShowPropertiesWindow(data& data)
                     ImGui::Text("TODO");
                     ImGui::EndTabItem();
                 }
+				if (ImGui::BeginTabItem("As Other Type"))
+				{
+                    ImGui::Text("TODO");
+					ImGui::EndTabItem();
+				}
                 ImGui::EndTabBar();
             }
             ImGui::EndChild();
