@@ -311,7 +311,7 @@ static void move_point(data& data, const bool is_canvas_hovered, int& selected_c
 			return glm::length(mouse_to_point) < point_radius;
 		};
         
-        for (size_t i = 0; i < data.splines_points.size(); i++)
+        for (size_t i = 0; i < data.splines_points.size() && point_near_mouse_id == -1; i++)
         {
 			const auto& control_points = data.splines_points[i];
             if (auto it = std::ranges::find_if(control_points, point_is_near_mouse); it != control_points.end())
@@ -331,6 +331,16 @@ static void move_point(data& data, const bool is_canvas_hovered, int& selected_c
     if (selected_point != -1 && selected_curve != -1)
     {
         data.splines_points[selected_curve][selected_point] =  {mouse_pos_in_canvas.x, mouse_pos_in_canvas.y};
+		if
+        (
+            data.splines_type[selected_curve] == spline_type::BEZIER
+            && selected_point % 3 == 0
+            && selected_point != 0
+            && selected_point != data.splines_points[selected_curve].size() - 2
+        )
+		{
+			data.splines_points[selected_curve][selected_point + 1] = { mouse_pos_in_canvas.x, mouse_pos_in_canvas.y };
+		}
         draw_point_info(data.splines_points[selected_curve][selected_point]);
         if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
         {
