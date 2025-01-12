@@ -399,17 +399,17 @@ static void SplinePropertiesTab(data& data, const size_t selected)
         }
         ImGui::EndChild();
         ImGui::PopStyleVar();
+
+        ImGui::SliderInt("Discretization", &data.splines_discretization[selected], 2, 200);
+
+        bool draw_control_polygon = static_cast<uint32_t>(data.splines_draw_options[selected] & draw_option::CONTROL_POLYGON);
+        if (ImGui::Checkbox("Draw control polygon", &draw_control_polygon)) { data.splines_draw_options[selected] ^= draw_option::CONTROL_POLYGON; }
+
+        bool draw_normals = static_cast<uint32_t>(data.splines_draw_options[selected] & draw_option::NORMALS);
+        if (ImGui::Checkbox("Draw normals", &draw_normals)) { data.splines_draw_options[selected] ^= draw_option::NORMALS; }
+
+        ImGui::EndTabItem();
     }
-
-    ImGui::SliderInt("Discretization", &data.splines_discretization[selected], 2, 200);
-
-    bool draw_control_polygon = static_cast<uint32_t>(data.splines_draw_options[selected] & draw_option::CONTROL_POLYGON);
-    if (ImGui::Checkbox("Draw control polygon", &draw_control_polygon)) { data.splines_draw_options[selected] ^= draw_option::CONTROL_POLYGON; }
-
-    bool draw_normals = static_cast<uint32_t>(data.splines_draw_options[selected] & draw_option::NORMALS);
-    if (ImGui::Checkbox("Draw normals", &draw_normals)) { data.splines_draw_options[selected] ^= draw_option::NORMALS; }
-
-    ImGui::EndTabItem();
 }
 
 static void GeneralSettings()
