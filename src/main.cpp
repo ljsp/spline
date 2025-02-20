@@ -9,6 +9,7 @@
 #include <iostream>
 #include <format>
 #include <ranges>
+#include <algorithm>
 
 #include "cubic_bezier_spline_2d/cubic_bezier_spline_2d.h"
 #include "cubic_hermite_spline_2d/cubic_hermite_spline_2d.h"
@@ -17,50 +18,65 @@
 
 enum class spline_type : uint32_t
 {
-	BEZIER,
+    BEZIER,
     HERMITE,
     BSPLINE
 };
 
 enum class draw_option : uint32_t
 {
-    NONE                = 0,
-    CONTROL_POLYGON     = 1 << 0,
-    NORMALS             = 1 << 1
+    NONE = 0,
+    CONTROL_POLYGON = 1 << 0,
+    NORMALS = 1 << 1,
+    BBOX = 1 << 2
 };
 
-inline draw_option operator|(draw_option a, draw_option b) 
+inline draw_option operator|(draw_option a, draw_option b)
 {
     return static_cast<draw_option>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
 }
 
-inline draw_option operator&(draw_option a, draw_option b) 
+inline draw_option operator&(draw_option a, draw_option b)
 {
     return static_cast<draw_option>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
 }
 
-inline draw_option& operator|=(draw_option& a, draw_option b) 
+inline draw_option& operator|=(draw_option& a, draw_option b)
 {
     a = a | b;
     return a;
 }
 
-inline draw_option& operator&=(draw_option& a, draw_option b) 
+inline draw_option& operator&=(draw_option& a, draw_option b)
 {
     a = a & b;
     return a;
 }
 
-inline draw_option& operator^=(draw_option& a, draw_option b) 
+inline draw_option& operator^=(draw_option& a, draw_option b)
 {
     a = static_cast<draw_option>(static_cast<uint32_t>(a) ^ static_cast<uint32_t>(b));
     return a;
 }
 
-inline draw_option operator~(draw_option a) 
+inline draw_option operator~(draw_option a)
 {
     return static_cast<draw_option>(~static_cast<uint32_t>(a));
 }
+
+struct axis_aligned_bounding_box
+{
+    glm::vec2 min = { INFINITY, INFINITY };
+    glm::vec2 max = { -INFINITY, -INFINITY };
+    explicit axis_aligned_bounding_box(const std::vector < glm::vec2 >& points)
+    {
+        std::ranges::for_each(points, [&](const glm::vec2& point)
+            {
+                min = glm::min(min, point);
+                max = glm::max(max, point);
+            });
+    }
+};
 
 struct data
 {
@@ -68,30 +84,32 @@ struct data
     std::vector<spline_type> splines_type;
     std::vector<glm::uvec3> splines_color;
     std::vector<int32_t> splines_discretization;
-	std::vector<draw_option> splines_draw_options;
+    std::vector<draw_option> splines_draw_options;
+    std::vector<axis_aligned_bounding_box> splines_bounding_boxs;
 
     void add_spline
     (
         const std::vector<glm::vec2>& spline_points,
         const spline_type spline_type,
         const glm::uvec3 spline_color = glm::uvec3(255, 255, 255),
-		const int32_t spline_discretization = 100
-	)
-	{
-		splines_points.push_back(spline_points);
-		splines_type.push_back(spline_type);
-		splines_color.push_back(spline_color);
-		splines_discretization.push_back(spline_discretization);
-		splines_draw_options.push_back(draw_option::NONE);
-	}
-    
-	void remove_spline(size_t index)
-	{
-		splines_points.erase(splines_points.begin() + index);
-		splines_type.erase(splines_type.begin() + index);
-		splines_color.erase(splines_color.begin() + index);
-		splines_discretization.erase(splines_discretization.begin() + index);
-	}
+        const int32_t spline_discretization = 100
+    )
+    {
+        splines_points.push_back(spline_points);
+        splines_type.push_back(spline_type);
+        splines_color.push_back(spline_color);
+        splines_discretization.push_back(spline_discretization);
+        splines_draw_options.push_back(draw_option::NONE);
+        splines_bounding_boxs.push_back(axis_aligned_bounding_box(spline_points));
+    }
+
+    void remove_spline(size_t index)
+    {
+        splines_points.erase(splines_points.begin() + index);
+        splines_type.erase(splines_type.begin() + index);
+        splines_color.erase(splines_color.begin() + index);
+        splines_discretization.erase(splines_discretization.begin() + index);
+    }
 };
 
 static void init_glfw_and_imgui(GLFWwindow*& window)
@@ -163,8 +181,8 @@ static void draw_context_menu(bool is_context_menu_drawn, bool& adding_line, std
 static void draw_point_info(const glm::vec2& point)
 {
     static ImVec2 offset(5.0f, 25.0f);
-	ImVec2 mouse_pos = ImGui::GetMousePos();
-    ImGui::SetNextWindowPos({mouse_pos.x + offset.x, mouse_pos.y - offset.y});
+    ImVec2 mouse_pos = ImGui::GetMousePos();
+    ImGui::SetNextWindowPos({ mouse_pos.x + offset.x, mouse_pos.y - offset.y });
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     {
         ImGui::OpenPopup("point info", ImGuiPopupFlags_MouseButtonLeft);
@@ -178,9 +196,9 @@ static void draw_point_info(const glm::vec2& point)
 
 static void draw_border(const ImVec2& canvas_p0, const ImVec2& canvas_p1)
 {
-        ImDrawList* draw_list = ImGui::GetWindowDrawList();
-        draw_list->AddRectFilled(canvas_p0, canvas_p1, IM_COL32(50, 50, 50, 255));
-        draw_list->AddRect(canvas_p0, canvas_p1, IM_COL32(255, 255, 255, 255));
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    draw_list->AddRectFilled(canvas_p0, canvas_p1, IM_COL32(50, 50, 50, 255));
+    draw_list->AddRect(canvas_p0, canvas_p1, IM_COL32(255, 255, 255, 255));
 }
 
 static void draw_grid(bool is_grid_drawn, const ImVec2& canvas_p0, const ImVec2& canvas_size, const glm::vec2& scrolling)
@@ -214,13 +232,13 @@ static void draw_discrete_points(const data& data, const glm::vec2& origin)
         switch (data.splines_type[i])
         {
             using enum spline_type;
-            case BEZIER:  { points = Discretization::Linear(CubicBezierSpline2d(control_points), discretization);  } break;
-            case HERMITE: { points = Discretization::Linear(CubicHermiteSpline2d(control_points), discretization); } break;
-            case BSPLINE: { points = Discretization::Linear(CubicBSpline2d(control_points), discretization);       } break;
-            default:                                                                                                 break;
+        case BEZIER: { points = Discretization::Linear(CubicBezierSpline2d(control_points), discretization);  } break;
+        case HERMITE: { points = Discretization::Linear(CubicHermiteSpline2d(control_points), discretization); } break;
+        case BSPLINE: { points = Discretization::Linear(CubicBSpline2d(control_points), discretization);       } break;
+        default:                                                                                                 break;
         }
 
-		auto draw_normals = static_cast<bool>(data.splines_draw_options[i] & draw_option::NORMALS);
+        auto draw_normals = static_cast<bool>(data.splines_draw_options[i] & draw_option::NORMALS);
         for (int n = 0; n < points.size() - 1; n++)
         {
             const glm::vec2 point = points[n] + origin;
@@ -249,8 +267,8 @@ static void draw_control_points(const data& data, const glm::vec2& origin, const
 {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
-	for (size_t i = 0; i < data.splines_points.size(); i++)
-	{
+    for (size_t i = 0; i < data.splines_points.size(); i++)
+    {
         const glm::vec2* previous_point = nullptr;
         auto draw_control_polygon = static_cast<bool>(data.splines_draw_options[i] & draw_option::CONTROL_POLYGON);
         for (const auto& point : data.splines_points[i])
@@ -269,7 +287,14 @@ static void draw_control_points(const data& data, const glm::vec2& origin, const
 
             previous_point = &point;
         }
-	}
+        auto draw_bbox = static_cast<bool>(data.splines_draw_options[i] & draw_option::BBOX);
+        if (draw_bbox)
+        {
+            const glm::vec2& min = data.splines_bounding_boxs[i].min;
+            const glm::vec2& max = data.splines_bounding_boxs[i].max;
+            draw_list->AddRect({ origin.x + min.x, origin.y + min.y }, { origin.x + max.x, origin.y + max.y }, IM_COL32(255, 255, 50, 255));
+        }
+    }
 }
 
 static void pan(bool is_active, bool is_context_menu_drawn, glm::vec2& scrolling)
@@ -305,49 +330,54 @@ static void move_point(data& data, const bool is_canvas_hovered, int& selected_c
     if (is_canvas_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     {
         int point_near_mouse_id = -1;
-		auto point_is_near_mouse = [&](const glm::vec2& point)
-		{
-			glm::vec2 mouse_to_point = glm::vec2(mouse_pos_in_canvas.x, mouse_pos_in_canvas.y) - point;
-			return glm::length(mouse_to_point) < point_radius;
-		};
-        
+        auto point_is_near_mouse = [&](const glm::vec2& point)
+            {
+                glm::vec2 mouse_to_point = glm::vec2(mouse_pos_in_canvas.x, mouse_pos_in_canvas.y) - point;
+                return glm::length(mouse_to_point) < point_radius;
+            };
+
         for (size_t i = 0; i < data.splines_points.size() && point_near_mouse_id == -1; i++)
         {
-			const auto& control_points = data.splines_points[i];
+            const auto& control_points = data.splines_points[i];
             if (auto it = std::ranges::find_if(control_points, point_is_near_mouse); it != control_points.end())
             {
                 point_near_mouse_id = static_cast<int>(std::distance(control_points.begin(), it));
             }
-        
-            if(point_near_mouse_id != -1)
+
+            if (point_near_mouse_id != -1)
             {
                 selected_curve = static_cast<int>(i);
                 selected_point = point_near_mouse_id;
             }
         }
-         
+
     }
-    
+
     if (selected_point != -1 && selected_curve != -1)
     {
-        data.splines_points[selected_curve][selected_point] =  {mouse_pos_in_canvas.x, mouse_pos_in_canvas.y};
-		if
-        (
-            data.splines_type[selected_curve] == spline_type::BEZIER
-            && selected_point % 3 == 0
-            && selected_point != 0
-            && selected_point != data.splines_points[selected_curve].size() - 2
-        )
-		{
-			data.splines_points[selected_curve][selected_point + 1] = { mouse_pos_in_canvas.x, mouse_pos_in_canvas.y };
-		}
+        data.splines_points[selected_curve][selected_point] = { mouse_pos_in_canvas.x, mouse_pos_in_canvas.y };
+        if
+            (
+                data.splines_type[selected_curve] == spline_type::BEZIER
+                && selected_point % 3 == 0
+                && selected_point != 0
+                && selected_point != data.splines_points[selected_curve].size() - 2
+                )
+        {
+            data.splines_points[selected_curve][selected_point + 1] = { mouse_pos_in_canvas.x, mouse_pos_in_canvas.y };
+        }
+
+        axis_aligned_bounding_box updated_bbox(data.splines_points[selected_curve]);
+        data.splines_bounding_boxs[selected_curve] = updated_bbox;
+
+
         draw_point_info(data.splines_points[selected_curve][selected_point]);
         if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
         {
             selected_curve = -1;
             selected_point = -1;
         }
-    } 
+    }
 }
 
 static void SplinePropertiesTab(data& data, const size_t selected)
@@ -408,6 +438,12 @@ static void SplinePropertiesTab(data& data, const size_t selected)
         bool draw_normals = static_cast<uint32_t>(data.splines_draw_options[selected] & draw_option::NORMALS);
         if (ImGui::Checkbox("Draw normals", &draw_normals)) { data.splines_draw_options[selected] ^= draw_option::NORMALS; }
 
+        ImGui::Text("Bounding box min : %f, %f", data.splines_bounding_boxs[selected].min.x, data.splines_bounding_boxs[selected].min.y);
+        ImGui::Text("Bounding box max : %f, %f", data.splines_bounding_boxs[selected].max.x, data.splines_bounding_boxs[selected].max.y);
+
+        bool draw_bbox = static_cast<uint32_t>(data.splines_draw_options[selected] & draw_option::BBOX);
+        if (ImGui::Checkbox("Draw bounding box", &draw_bbox)) { data.splines_draw_options[selected] ^= draw_option::BBOX; }
+
         ImGui::EndTabItem();
     }
 }
@@ -441,10 +477,10 @@ static void SplineProperties(data& data, size_t& selected)
     switch (data.splines_type[selected])
     {
         using enum spline_type;
-        case BEZIER:  { type = "Bezier";  } break;
-        case HERMITE: { type = "Hermite"; } break;
-        case BSPLINE: { type = "BSpline"; } break;
-        default:                            break;
+    case BEZIER: { type = "Bezier";  } break;
+    case HERMITE: { type = "Hermite"; } break;
+    case BSPLINE: { type = "BSpline"; } break;
+    default:                            break;
     }
     ImGui::Text("Type: %s", type.c_str());
 
@@ -483,19 +519,19 @@ static void ShowPropertiesWindow(data& data)
     if (ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_NoCollapse))
     {
         static size_t selected = 0;
-        
+
         // Top
         GeneralSettings();
-        
+
         // Left
         SplineList(data, selected);
         ImGui::SameLine();
 
-		if (data.splines_points.empty())
-		{
-			ImGui::End();
-			return;
-		}
+        if (data.splines_points.empty())
+        {
+            ImGui::End();
+            return;
+        }
 
         // Right
         SplineProperties(data, selected);
@@ -503,30 +539,30 @@ static void ShowPropertiesWindow(data& data)
     ImGui::End();
 }
 
-int main() 
+int main()
 {
-    GLFWwindow* window = nullptr;   
+    GLFWwindow* window = nullptr;
 
     init_glfw_and_imgui(window);
 
     const ImGuiIO& io = ImGui::GetIO(); (void)io;
-    
+
     static bool show_window = false;
     static bool opt_enable_grid = true;
     static bool opt_enable_context_menu = true;
     static float point_radius = 5.;
-    
+
     static glm::vec2 scrolling(0.0f, 0.0f);
-	static int selected_curve = -1;
+    static int selected_curve = -1;
     static int selected_point = -1;
-    
+
     data data;
     std::vector<glm::vec2> bezier_control_points = { {0, 0}, {0, 100}, {100, 100}, {100, 0}, {200, 0}, {200, 100}, {200, 200}, {300, 0} };
     std::vector<glm::vec2> bspline_control_points = { {0, 0}, {0, 100}, {100, 100}, {100, 0}, {200, 0}, {200, 100}, {200, 200}, {300, 0} };
     data.add_spline(bezier_control_points, spline_type::BEZIER);
     data.add_spline(bspline_control_points, spline_type::BSPLINE);
 
-    while (!glfwWindowShouldClose(window)) 
+    while (!glfwWindowShouldClose(window))
     {
         // Data
         CubicBSpline2d bezier_spline(bezier_control_points);
@@ -535,7 +571,7 @@ int main()
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        
+
         ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoCollapse);
 
         ImGui::Checkbox("Enable grid", &opt_enable_grid); ImGui::SameLine();
@@ -545,7 +581,7 @@ int main()
 
         ImGui::Text("Mouse Left: drag to add lines,\nMouse Right: drag to scroll, click for context menu.");
         ImGui::SliderFloat("Point size", &point_radius, 1., 20.);
-        
+
         ImVec2 canvas_sz = ImGui::GetContentRegionAvail();
         if (canvas_sz.x < 50.0f) canvas_sz.x = 50.0f;
         if (canvas_sz.y < 50.0f) canvas_sz.y = 50.0f;
@@ -574,7 +610,7 @@ int main()
         draw_control_points(data, origin, mouse_pos_in_canvas, point_radius);
 
         if (show_window) { ImGui::ShowDemoWindow(&show_window); }
-        
+
         ShowPropertiesWindow(data);
 
         ImGui::GetWindowDrawList()->PopClipRect();
